@@ -3,8 +3,13 @@ const video = document.getElementById("video");
 const canvas = document.getElementById("canvas");
 const ctx = canvas.getContext("2d");
 
+// Drawing state
 let prev = null;
 let last = null;
+let drawing = false;
+
+let strokes = []; // for undo
+let currentStroke = [];
 
 let color = "#00ffff";
 let size = 5;
@@ -26,27 +31,25 @@ const hands = new Hands({
 hands.setOptions({
   maxNumHands: 1,
   modelComplexity: 1,
-  minDetectionConfidence: 0.4,   // 🔥 lower = better weak detection
+  minDetectionConfidence: 0.4,
   minTrackingConfidence: 0.4
 });
 
-// Gesture detection
+// ---------- Gesture Utils ----------
 function fingerUp(l, tip, pip) {
   return l[tip].y < l[pip].y;
 }
 
-function isDrawGesture(l) {
-  return fingerUp(l, 8, 6) &&  // index up
+function isDraw(l) {
+  return fingerUp(l, 8, 6) &&
          !fingerUp(l, 12, 10) &&
-         !fingerUp(l, 16, 14) &&
-         !fingerUp(l, 20, 18);
+         !fingerUp(l, 16, 14);
 }
 
 function isPalm(l) {
   return fingerUp(l, 8, 6) &&
          fingerUp(l, 12, 10) &&
-         fingerUp(l, 16, 14) &&
-         fingerUp(l, 20, 18);
+         fingerUp(l, 16, 14);
 }
 
 function isFist(l) {
@@ -54,24 +57,51 @@ function isFist(l) {
          !fingerUp(l, 12, 10);
 }
 
-// Gesture timers (avoid flicker)
-let palmTimer = 0;
+// ---------- Stability Timers ----------
+let palmCount = 0;
+let gestureBuffer = [];
 
 // Smooth filter
-function smoothPoint(newPoint) {
-  if (!last) return newPoint;
+function smooth(p) {
+  if (!last) return p;
 
   return {
-    x: last.x * 0.7 + newPoint.x * 0.3,
-    y: last.y * 0.7 + newPoint.y * 0.3
+    x: last.x * 0.7 + p.x * 0.3,
+    y: last.y * 0.7 + p.y * 0.3
   };
 }
 
-// Main logic
+// Undo
+function undoLast() {
+  strokes.pop();
+  redrawCanvas();
+}
+
+function redrawCanvas() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  strokes.forEach(stroke => {
+    for (let i = 1; i < stroke.length; i++) {
+      ctx.beginPath();
+      ctx.moveTo(stroke[i-1].x, stroke[i-1].y);
+      ctx.lineTo(stroke[i].x, stroke[i].y);
+      ctx.strokeStyle = stroke[i].color;
+      ctx.lineWidth = stroke[i].size;
+      ctx.lineCap = "round";
+      ctx.stroke();
+    }
+  });
+}
+
+// ---------- MAIN ----------
 hands.onResults((results) => {
 
+  // 🛠 FIX: When hand disappears
   if (!results.multiHandLandmarks) {
-    prev = last = null;
+    prev = null;
+    last = null;
+    drawing = false;
+    currentStroke = [];
     return;
   }
 
@@ -82,45 +112,59 @@ hands.onResults((results) => {
     y: l[8].y * canvas.height
   };
 
-  point = smoothPoint(point);
+  point = smooth(point);
   last = point;
 
-  // ✋ CLEAR (hold palm)
-  if (isPalm(l)) {
-    palmTimer++;
+  // ---------- Gesture Stability ----------
+  let currentGesture = "none";
 
-    if (palmTimer > 10) {
+  if (isPalm(l)) currentGesture = "palm";
+  else if (isFist(l)) currentGesture = "fist";
+  else if (isDraw(l)) currentGesture = "draw";
+
+  gestureBuffer.push(currentGesture);
+  if (gestureBuffer.length > 5) gestureBuffer.shift();
+
+  const stableGesture = gestureBuffer.every(g => g === currentGesture)
+    ? currentGesture
+    : "none";
+
+  // ---------- CLEAR ----------
+  if (stableGesture === "palm") {
+    palmCount++;
+
+    if (palmCount > 15) {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
+      strokes = [];
     }
 
-    prev = null;
+    drawing = false;
     return;
   } else {
-    palmTimer = 0;
+    palmCount = 0;
   }
 
-  // ✊ PAUSE
-  if (isFist(l)) {
-    prev = null;
+  // ---------- PAUSE ----------
+  if (stableGesture === "fist") {
+    drawing = false;
     return;
   }
 
-  // ✏️ DRAW
-  if (isDrawGesture(l)) {
+  // ---------- DRAW ----------
+  if (stableGesture === "draw") {
+
+    drawing = true;
 
     if (prev) {
-
       const dx = point.x - prev.x;
       const dy = point.y - prev.y;
       const dist = Math.sqrt(dx * dx + dy * dy);
 
-      // noise filter
-      if (dist < 60) {
+      if (dist < 70) {
 
         ctx.beginPath();
         ctx.moveTo(prev.x, prev.y);
 
-        // smooth curve
         const midX = (prev.x + point.x) / 2;
         const midY = (prev.y + point.y) / 2;
 
@@ -131,18 +175,32 @@ hands.onResults((results) => {
         ctx.lineCap = "round";
 
         ctx.shadowColor = color;
-        ctx.shadowBlur = 10;
+        ctx.shadowBlur = 8;
 
         ctx.stroke();
+
+        // save stroke
+        currentStroke.push({
+          x: point.x,
+          y: point.y,
+          color,
+          size
+        });
       }
     }
 
     prev = point;
 
   } else {
+    // Save completed stroke
+    if (drawing && currentStroke.length > 0) {
+      strokes.push(currentStroke);
+      currentStroke = [];
+    }
+
+    drawing = false;
     prev = null;
   }
-
 });
 
 // Camera
