@@ -8,14 +8,18 @@ const saveBtn = document.getElementById("saveBtn");
 const colorPicker = document.getElementById("colorPicker");
 const brushSize = document.getElementById("brushSize");
 
-// Drawing state
 let prevX = null;
 let prevY = null;
 
 let color = colorPicker.value;
 let size = brushSize.value;
 
-// Resize canvas
+// Smooth filter
+let lastX = null;
+let lastY = null;
+const smoothFactor = 0.7;
+
+// Resize
 function resizeCanvas() {
   canvas.width = window.innerWidth;
   canvas.height = window.innerHeight;
@@ -27,9 +31,7 @@ window.addEventListener("resize", resizeCanvas);
 colorPicker.oninput = () => color = colorPicker.value;
 brushSize.oninput = () => size = brushSize.value;
 
-clearBtn.onclick = () => {
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-};
+clearBtn.onclick = () => ctx.clearRect(0, 0, canvas.width, canvas.height);
 
 saveBtn.onclick = () => {
   const link = document.createElement("a");
@@ -38,89 +40,93 @@ saveBtn.onclick = () => {
   link.click();
 };
 
-// MediaPipe setup
+// MediaPipe
 const hands = new Hands({
   locateFile: (file) =>
     `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
 });
 
-// Better mobile detection
 hands.setOptions({
   maxNumHands: 1,
   modelComplexity: 1,
-  minDetectionConfidence: 0.5,
-  minTrackingConfidence: 0.5
+  minDetectionConfidence: 0.6,
+  minTrackingConfidence: 0.6
 });
 
-// Gesture detection
+// Better gesture detection
+function isIndexOnly(l) {
+  return (
+    l[8].y < l[6].y &&   // index up
+    l[12].y > l[10].y && // middle down
+    l[16].y > l[14].y && // ring down
+    l[20].y > l[18].y    // pinky down
+  );
+}
+
 function isOpenPalm(l) {
-  return l[8].y < l[6].y &&
-         l[12].y < l[10].y &&
-         l[16].y < l[14].y &&
-         l[20].y < l[18].y;
+  return (
+    l[8].y < l[6].y &&
+    l[12].y < l[10].y &&
+    l[16].y < l[14].y &&
+    l[20].y < l[18].y
+  );
 }
 
-function isIndexUp(l) {
-  return l[8].y < l[6].y;
-}
-
-// Main tracking
+// Main logic
 hands.onResults((results) => {
-
-  console.log("Hand Results:", results); // FIX 2
 
   if (!results.multiHandLandmarks) {
     prevX = prevY = null;
+    lastX = lastY = null;
     return;
   }
 
-  const landmarks = results.multiHandLandmarks[0];
+  const l = results.multiHandLandmarks[0];
 
-  // FIX 5 (DEBUG RED DOTS)
-  ctx.fillStyle = "red";
-  for (let i = 0; i < landmarks.length; i++) {
-    let px = (1 - landmarks[i].x) * canvas.width;
-    let py = landmarks[i].y * canvas.height;
+  // Index finger tip only
+  let x = (1 - l[8].x) * canvas.width;
+  let y = l[8].y * canvas.height;
 
-    ctx.beginPath();
-    ctx.arc(px, py, 4, 0, 2 * Math.PI);
-    ctx.fill();
+  // Smooth movement
+  if (lastX !== null) {
+    x = lastX * smoothFactor + x * (1 - smoothFactor);
+    y = lastY * smoothFactor + y * (1 - smoothFactor);
   }
 
-  // Index finger position
-  const x = (1 - landmarks[8].x) * canvas.width;
-  const y = landmarks[8].y * canvas.height;
+  lastX = x;
+  lastY = y;
 
-  // ERASE (open palm)
-  if (isOpenPalm(landmarks)) {
+  // ✋ Erase
+  if (isOpenPalm(l)) {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     prevX = prevY = null;
     return;
   }
 
-  // DRAW (index finger)
-  if (isIndexUp(landmarks)) {
+  // ✏️ Draw only when index finger alone
+  if (isIndexOnly(l)) {
 
-    // Smooth interpolation
-    if (prevX && prevY) {
-      ctx.beginPath();
-      ctx.moveTo(prevX, prevY);
+    if (prevX !== null && prevY !== null) {
 
-      // smoothing effect
-      const smoothX = (prevX + x) / 2;
-      const smoothY = (prevY + y) / 2;
+      // Distance check (avoid jumps)
+      const dx = x - prevX;
+      const dy = y - prevY;
+      const distance = Math.sqrt(dx * dx + dy * dy);
 
-      ctx.lineTo(smoothX, smoothY);
+      if (distance < 80) {
+        ctx.beginPath();
+        ctx.moveTo(prevX, prevY);
+        ctx.lineTo(x, y);
 
-      ctx.strokeStyle = color;
-      ctx.lineWidth = size;
-      ctx.lineCap = "round";
+        ctx.strokeStyle = color;
+        ctx.lineWidth = size;
+        ctx.lineCap = "round";
 
-      // Glow effect
-      ctx.shadowColor = color;
-      ctx.shadowBlur = 15;
+        ctx.shadowColor = color;
+        ctx.shadowBlur = 12;
 
-      ctx.stroke();
+        ctx.stroke();
+      }
     }
 
     prevX = x;
@@ -131,7 +137,7 @@ hands.onResults((results) => {
   }
 });
 
-// Camera start (FIXED)
+// Camera
 const camera = new Camera(video, {
   onFrame: async () => {
     if (video.readyState === 4) {
