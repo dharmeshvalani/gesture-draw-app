@@ -3,21 +3,11 @@ const video = document.getElementById("video");
 const canvas = document.getElementById("canvas");
 const ctx = canvas.getContext("2d");
 
-const clearBtn = document.getElementById("clearBtn");
-const saveBtn = document.getElementById("saveBtn");
-const colorPicker = document.getElementById("colorPicker");
-const brushSize = document.getElementById("brushSize");
+let prev = null;
+let last = null;
 
-let prevX = null;
-let prevY = null;
-
-let color = colorPicker.value;
-let size = brushSize.value;
-
-// Smooth filter
-let lastX = null;
-let lastY = null;
-const smoothFactor = 0.7;
+let color = "#00ffff";
+let size = 5;
 
 // Resize
 function resizeCanvas() {
@@ -26,19 +16,6 @@ function resizeCanvas() {
 }
 resizeCanvas();
 window.addEventListener("resize", resizeCanvas);
-
-// Controls
-colorPicker.oninput = () => color = colorPicker.value;
-brushSize.oninput = () => size = brushSize.value;
-
-clearBtn.onclick = () => ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-saveBtn.onclick = () => {
-  const link = document.createElement("a");
-  link.download = "drawing.png";
-  link.href = canvas.toDataURL();
-  link.click();
-};
 
 // MediaPipe
 const hands = new Hands({
@@ -49,92 +26,123 @@ const hands = new Hands({
 hands.setOptions({
   maxNumHands: 1,
   modelComplexity: 1,
-  minDetectionConfidence: 0.6,
-  minTrackingConfidence: 0.6
+  minDetectionConfidence: 0.4,   // 🔥 lower = better weak detection
+  minTrackingConfidence: 0.4
 });
 
-// Better gesture detection
-function isIndexOnly(l) {
-  return (
-    l[8].y < l[6].y &&   // index up
-    l[12].y > l[10].y && // middle down
-    l[16].y > l[14].y && // ring down
-    l[20].y > l[18].y    // pinky down
-  );
+// Gesture detection
+function fingerUp(l, tip, pip) {
+  return l[tip].y < l[pip].y;
 }
 
-function isOpenPalm(l) {
-  return (
-    l[8].y < l[6].y &&
-    l[12].y < l[10].y &&
-    l[16].y < l[14].y &&
-    l[20].y < l[18].y
-  );
+function isDrawGesture(l) {
+  return fingerUp(l, 8, 6) &&  // index up
+         !fingerUp(l, 12, 10) &&
+         !fingerUp(l, 16, 14) &&
+         !fingerUp(l, 20, 18);
+}
+
+function isPalm(l) {
+  return fingerUp(l, 8, 6) &&
+         fingerUp(l, 12, 10) &&
+         fingerUp(l, 16, 14) &&
+         fingerUp(l, 20, 18);
+}
+
+function isFist(l) {
+  return !fingerUp(l, 8, 6) &&
+         !fingerUp(l, 12, 10);
+}
+
+// Gesture timers (avoid flicker)
+let palmTimer = 0;
+
+// Smooth filter
+function smoothPoint(newPoint) {
+  if (!last) return newPoint;
+
+  return {
+    x: last.x * 0.7 + newPoint.x * 0.3,
+    y: last.y * 0.7 + newPoint.y * 0.3
+  };
 }
 
 // Main logic
 hands.onResults((results) => {
 
   if (!results.multiHandLandmarks) {
-    prevX = prevY = null;
-    lastX = lastY = null;
+    prev = last = null;
     return;
   }
 
   const l = results.multiHandLandmarks[0];
 
-  // Index finger tip only
-  let x = (1 - l[8].x) * canvas.width;
-  let y = l[8].y * canvas.height;
+  let point = {
+    x: (1 - l[8].x) * canvas.width,
+    y: l[8].y * canvas.height
+  };
 
-  // Smooth movement
-  if (lastX !== null) {
-    x = lastX * smoothFactor + x * (1 - smoothFactor);
-    y = lastY * smoothFactor + y * (1 - smoothFactor);
+  point = smoothPoint(point);
+  last = point;
+
+  // ✋ CLEAR (hold palm)
+  if (isPalm(l)) {
+    palmTimer++;
+
+    if (palmTimer > 10) {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+    }
+
+    prev = null;
+    return;
+  } else {
+    palmTimer = 0;
   }
 
-  lastX = x;
-  lastY = y;
-
-  // ✋ Erase
-  if (isOpenPalm(l)) {
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    prevX = prevY = null;
+  // ✊ PAUSE
+  if (isFist(l)) {
+    prev = null;
     return;
   }
 
-  // ✏️ Draw only when index finger alone
-  if (isIndexOnly(l)) {
+  // ✏️ DRAW
+  if (isDrawGesture(l)) {
 
-    if (prevX !== null && prevY !== null) {
+    if (prev) {
 
-      // Distance check (avoid jumps)
-      const dx = x - prevX;
-      const dy = y - prevY;
-      const distance = Math.sqrt(dx * dx + dy * dy);
+      const dx = point.x - prev.x;
+      const dy = point.y - prev.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
 
-      if (distance < 80) {
+      // noise filter
+      if (dist < 60) {
+
         ctx.beginPath();
-        ctx.moveTo(prevX, prevY);
-        ctx.lineTo(x, y);
+        ctx.moveTo(prev.x, prev.y);
+
+        // smooth curve
+        const midX = (prev.x + point.x) / 2;
+        const midY = (prev.y + point.y) / 2;
+
+        ctx.quadraticCurveTo(prev.x, prev.y, midX, midY);
 
         ctx.strokeStyle = color;
         ctx.lineWidth = size;
         ctx.lineCap = "round";
 
         ctx.shadowColor = color;
-        ctx.shadowBlur = 12;
+        ctx.shadowBlur = 10;
 
         ctx.stroke();
       }
     }
 
-    prevX = x;
-    prevY = y;
+    prev = point;
 
   } else {
-    prevX = prevY = null;
+    prev = null;
   }
+
 });
 
 // Camera
