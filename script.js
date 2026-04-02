@@ -16,8 +16,8 @@ let currentStroke = [];
 let color = "#00ffff";
 let size = 5;
 
-// Gesture state
 let lastGesture = "";
+let isDrawing = false;
 
 // Resize
 function resizeCanvas() {
@@ -52,7 +52,7 @@ function redraw() {
   strokes.forEach(stroke => {
     for (let i = 1; i < stroke.length; i++) {
       ctx.beginPath();
-      ctx.moveTo(stroke[i-1].x, stroke[i-1].y);
+      ctx.moveTo(stroke[i - 1].x, stroke[i - 1].y);
       ctx.lineTo(stroke[i].x, stroke[i].y);
       ctx.strokeStyle = stroke[i].color;
       ctx.lineWidth = stroke[i].size;
@@ -112,12 +112,13 @@ hands.setOptions({
 // MAIN
 hands.onResults((results) => {
 
-  // 🔴 FIX: reset when hand disappears
-  if (!results.multiHandLandmarks) {
+  // 🔴 FULL RESET WHEN HAND LOST
+  if (!results.multiHandLandmarks || results.multiHandLandmarks.length === 0) {
     prev = null;
     last = null;
     currentStroke = [];
     lastGesture = "";
+    isDrawing = false;
     return;
   }
 
@@ -136,34 +137,36 @@ hands.onResults((results) => {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     strokes = [];
     prev = null;
+    isDrawing = false;
     return;
   }
 
   // ✊ Pause
   if (isFist(l)) {
     prev = null;
+    isDrawing = false;
     return;
   }
 
-  // 🎨 Color change (only once per gesture)
+  // 🎨 Color change (safe trigger)
   if (isTwoFinger(l) && lastGesture !== "two") {
     const colors = ["#00ffff", "#ff3b3b", "#00ff88", "#ffd500"];
     const index = colors.indexOf(color);
     color = colors[(index + 1) % colors.length];
   }
 
-  // ✏️ Draw (ONLY when stable)
+  // ✏️ Draw
   if (isDraw(l)) {
 
-    if (prev) {
+    isDrawing = true;
 
+    if (prev) {
       const dx = p.x - prev.x;
       const dy = p.y - prev.y;
       const dist = Math.sqrt(dx * dx + dy * dy);
 
-      // 🔴 FIX: ignore jumps
+      // Prevent jump lines
       if (dist < 80) {
-
         ctx.beginPath();
         ctx.moveTo(prev.x, prev.y);
 
@@ -186,12 +189,13 @@ hands.onResults((results) => {
 
   } else {
 
-    // Save stroke
-    if (currentStroke.length > 0) {
+    // Save stroke properly
+    if (isDrawing && currentStroke.length > 0) {
       strokes.push(currentStroke);
       currentStroke = [];
     }
 
+    isDrawing = false;
     prev = null;
   }
 
