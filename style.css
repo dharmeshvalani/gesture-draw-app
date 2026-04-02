@@ -2,7 +2,6 @@
   margin: 0;
   padding: 0;
   box-sizing: border-box;
-  font-family: -apple-system, BlinkMacSystemFont, sans-serif;
 }
 
 body {
@@ -16,7 +15,6 @@ body {
   height: 100vh;
 }
 
-/* Video + Canvas */
 video, canvas {
   position: absolute;
   width: 100%;
@@ -28,63 +26,19 @@ video {
   transform: scaleX(-1);
 }
 
-canvas {
-  pointer-events: none;
-}
-
-/* Glass Panel */
 .panel {
   position: absolute;
   bottom: 20px;
   left: 50%;
   transform: translateX(-50%);
-  
-  display: flex;
-  gap: 15px;
-  align-items: center;
-
-  padding: 15px 20px;
-
-  background: rgba(255,255,255,0.08);
-  backdrop-filter: blur(20px);
-  border-radius: 20px;
-
-  box-shadow: 0 8px 32px rgba(0,0,0,0.5);
-}
-
-.group {
-  display: flex;
-  flex-direction: column;
-  color: white;
-  font-size: 12px;
-}
-
-input[type="color"] {
-  width: 40px;
-  height: 40px;
-  border: none;
-  background: none;
-}
-
-input[type="range"] {
-  width: 100px;
-}
-
-.buttons {
   display: flex;
   gap: 10px;
 }
 
 button {
+  padding: 10px;
   border: none;
-  padding: 10px 15px;
-  border-radius: 12px;
-  cursor: pointer;
-  background: rgba(255,255,255,0.15);
+  border-radius: 10px;
+  background: rgba(255,255,255,0.2);
   color: white;
-  transition: 0.3s;
-}
-
-button:hover {
-  background: rgba(255,255,255,0.3);
 }
