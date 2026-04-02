@@ -13,16 +13,11 @@ let last = null;
 let strokes = [];
 let currentStroke = [];
 
-let colors = ["#00ffff", "#ff3b3b", "#00ff88", "#ffd500"];
-let colorIndex = 0;
-let color = colors[colorIndex];
-
+let color = "#00ffff";
 let size = 5;
 
-// Transform (zoom + pan)
-let scale = 1;
-let offsetX = 0;
-let offsetY = 0;
+// Gesture state
+let lastGesture = "";
 
 // Resize
 function resizeCanvas() {
@@ -50,12 +45,9 @@ saveBtn.onclick = () => {
   link.click();
 };
 
-// Redraw with transform
+// Redraw
 function redraw() {
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-  ctx.setTransform(scale, 0, 0, scale, offsetX, offsetY);
 
   strokes.forEach(stroke => {
     for (let i = 1; i < stroke.length; i++) {
@@ -73,9 +65,10 @@ function redraw() {
 // Smooth
 function smooth(p) {
   if (!last) return p;
+
   return {
-    x: last.x * 0.7 + p.x * 0.3,
-    y: last.y * 0.7 + p.y * 0.3
+    x: last.x * 0.75 + p.x * 0.25,
+    y: last.y * 0.75 + p.y * 0.25
   };
 }
 
@@ -103,19 +96,6 @@ function isFist(l) {
          !fingerUp(l, 12, 10);
 }
 
-// Pinch distance
-function pinchDistance(l) {
-  return Math.hypot(
-    l[4].x - l[8].x,
-    l[4].y - l[8].y
-  );
-}
-
-// Gesture memory
-let lastGesture = "";
-let lastPinch = null;
-let lastPan = null;
-
 // MediaPipe
 const hands = new Hands({
   locateFile: (file) =>
@@ -129,13 +109,15 @@ hands.setOptions({
   minTrackingConfidence: 0.5
 });
 
-// Main
+// MAIN
 hands.onResults((results) => {
 
+  // 🔴 FIX: reset when hand disappears
   if (!results.multiHandLandmarks) {
-    prev = last = null;
-    lastPinch = null;
-    lastPan = null;
+    prev = null;
+    last = null;
+    currentStroke = [];
+    lastGesture = "";
     return;
   }
 
@@ -163,68 +145,53 @@ hands.onResults((results) => {
     return;
   }
 
-  // 🎨 Color change (two finger tap)
+  // 🎨 Color change (only once per gesture)
   if (isTwoFinger(l) && lastGesture !== "two") {
-    colorIndex = (colorIndex + 1) % colors.length;
-    color = colors[colorIndex];
+    const colors = ["#00ffff", "#ff3b3b", "#00ff88", "#ffd500"];
+    const index = colors.indexOf(color);
+    color = colors[(index + 1) % colors.length];
   }
 
-  // 🔍 Zoom (pinch)
-  const pinch = pinchDistance(l);
-
-  if (pinch) {
-    if (lastPinch) {
-      const diff = pinch - lastPinch;
-      scale += diff * 2;
-
-      scale = Math.max(0.5, Math.min(3, scale));
-      redraw();
-    }
-    lastPinch = pinch;
-  }
-
-  // 🖐 Pan (move open hand)
-  if (isPalm(l)) {
-    if (lastPan) {
-      offsetX += p.x - lastPan.x;
-      offsetY += p.y - lastPan.y;
-      redraw();
-    }
-    lastPan = p;
-  } else {
-    lastPan = null;
-  }
-
-  // ✏️ Draw
+  // ✏️ Draw (ONLY when stable)
   if (isDraw(l)) {
 
     if (prev) {
-      ctx.setTransform(scale, 0, 0, scale, offsetX, offsetY);
 
-      ctx.beginPath();
-      ctx.moveTo(prev.x, prev.y);
+      const dx = p.x - prev.x;
+      const dy = p.y - prev.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
 
-      const midX = (prev.x + p.x) / 2;
-      const midY = (prev.y + p.y) / 2;
+      // 🔴 FIX: ignore jumps
+      if (dist < 80) {
 
-      ctx.quadraticCurveTo(prev.x, prev.y, midX, midY);
+        ctx.beginPath();
+        ctx.moveTo(prev.x, prev.y);
 
-      ctx.strokeStyle = color;
-      ctx.lineWidth = size;
-      ctx.lineCap = "round";
+        const midX = (prev.x + p.x) / 2;
+        const midY = (prev.y + p.y) / 2;
 
-      ctx.stroke();
+        ctx.quadraticCurveTo(prev.x, prev.y, midX, midY);
 
-      currentStroke.push({ ...p, color, size });
+        ctx.strokeStyle = color;
+        ctx.lineWidth = size;
+        ctx.lineCap = "round";
+
+        ctx.stroke();
+
+        currentStroke.push({ ...p, color, size });
+      }
     }
 
     prev = p;
 
   } else {
+
+    // Save stroke
     if (currentStroke.length > 0) {
       strokes.push(currentStroke);
       currentStroke = [];
     }
+
     prev = null;
   }
 
