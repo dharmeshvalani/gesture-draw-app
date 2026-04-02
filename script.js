@@ -3,15 +3,17 @@ const video = document.getElementById("video");
 const canvas = document.getElementById("canvas");
 const ctx = canvas.getContext("2d");
 
-// Drawing state
 let prev = null;
 let last = null;
 let drawing = false;
 
-let strokes = []; // for undo
+let strokes = [];
 let currentStroke = [];
 
-let color = "#00ffff";
+let colors = ["#00ffff", "#ff3b3b", "#00ff88", "#ffd500"];
+let colorIndex = 0;
+let color = colors[colorIndex];
+
 let size = 5;
 
 // Resize
@@ -35,7 +37,7 @@ hands.setOptions({
   minTrackingConfidence: 0.4
 });
 
-// ---------- Gesture Utils ----------
+// Gesture helpers
 function fingerUp(l, tip, pip) {
   return l[tip].y < l[pip].y;
 }
@@ -44,6 +46,10 @@ function isDraw(l) {
   return fingerUp(l, 8, 6) &&
          !fingerUp(l, 12, 10) &&
          !fingerUp(l, 16, 14);
+}
+
+function isTwoFinger(l) {
+  return fingerUp(l, 8, 6) && fingerUp(l, 12, 10);
 }
 
 function isPalm(l) {
@@ -57,14 +63,9 @@ function isFist(l) {
          !fingerUp(l, 12, 10);
 }
 
-// ---------- Stability Timers ----------
-let palmCount = 0;
-let gestureBuffer = [];
-
-// Smooth filter
+// Smooth
 function smooth(p) {
   if (!last) return p;
-
   return {
     x: last.x * 0.7 + p.x * 0.3,
     y: last.y * 0.7 + p.y * 0.3
@@ -72,14 +73,13 @@ function smooth(p) {
 }
 
 // Undo
-function undoLast() {
+function undo() {
   strokes.pop();
-  redrawCanvas();
+  redraw();
 }
 
-function redrawCanvas() {
+function redraw() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-
   strokes.forEach(stroke => {
     for (let i = 1; i < stroke.length; i++) {
       ctx.beginPath();
@@ -87,86 +87,90 @@ function redrawCanvas() {
       ctx.lineTo(stroke[i].x, stroke[i].y);
       ctx.strokeStyle = stroke[i].color;
       ctx.lineWidth = stroke[i].size;
-      ctx.lineCap = "round";
       ctx.stroke();
     }
   });
 }
 
-// ---------- MAIN ----------
+// Gesture buffer
+let buffer = [];
+let palmHold = 0;
+let lastGesture = "";
+
+// Main
 hands.onResults((results) => {
 
-  // 🛠 FIX: When hand disappears
   if (!results.multiHandLandmarks) {
-    prev = null;
-    last = null;
+    prev = last = null;
     drawing = false;
-    currentStroke = [];
     return;
   }
 
   const l = results.multiHandLandmarks[0];
 
-  let point = {
+  let p = {
     x: (1 - l[8].x) * canvas.width,
     y: l[8].y * canvas.height
   };
 
-  point = smooth(point);
-  last = point;
+  p = smooth(p);
+  last = p;
 
-  // ---------- Gesture Stability ----------
-  let currentGesture = "none";
+  // Detect gesture
+  let g = "none";
+  if (isPalm(l)) g = "palm";
+  else if (isFist(l)) g = "fist";
+  else if (isTwoFinger(l)) g = "two";
+  else if (isDraw(l)) g = "draw";
 
-  if (isPalm(l)) currentGesture = "palm";
-  else if (isFist(l)) currentGesture = "fist";
-  else if (isDraw(l)) currentGesture = "draw";
+  buffer.push(g);
+  if (buffer.length > 5) buffer.shift();
 
-  gestureBuffer.push(currentGesture);
-  if (gestureBuffer.length > 5) gestureBuffer.shift();
+  const stable = buffer.every(x => x === g) ? g : "none";
 
-  const stableGesture = gestureBuffer.every(g => g === currentGesture)
-    ? currentGesture
-    : "none";
-
-  // ---------- CLEAR ----------
-  if (stableGesture === "palm") {
-    palmCount++;
-
-    if (palmCount > 15) {
+  // ✋ Clear
+  if (stable === "palm") {
+    palmHold++;
+    if (palmHold > 15) {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       strokes = [];
     }
-
-    drawing = false;
     return;
   } else {
-    palmCount = 0;
+    palmHold = 0;
   }
 
-  // ---------- PAUSE ----------
-  if (stableGesture === "fist") {
+  // ✊ Pause
+  if (stable === "fist") {
     drawing = false;
     return;
   }
 
-  // ---------- DRAW ----------
-  if (stableGesture === "draw") {
+  // ✌️ Two finger → change color
+  if (stable === "two" && lastGesture !== "two") {
+    colorIndex = (colorIndex + 1) % colors.length;
+    color = colors[colorIndex];
+  }
 
-    drawing = true;
+  // ✌️ Hold two finger → increase size
+  if (stable === "two") {
+    size = Math.min(size + 0.1, 20);
+  }
+
+  // ✏️ Draw
+  if (stable === "draw") {
 
     if (prev) {
-      const dx = point.x - prev.x;
-      const dy = point.y - prev.y;
+      const dx = p.x - prev.x;
+      const dy = p.y - prev.y;
       const dist = Math.sqrt(dx * dx + dy * dy);
 
       if (dist < 70) {
-
         ctx.beginPath();
         ctx.moveTo(prev.x, prev.y);
 
-        const midX = (prev.x + point.x) / 2;
-        const midY = (prev.y + point.y) / 2;
+        const midX = (prev.x + p.x) / 2;
+        const midY = (prev.y + p.y) / 2;
 
         ctx.quadraticCurveTo(prev.x, prev.y, midX, midY);
 
@@ -175,32 +179,26 @@ hands.onResults((results) => {
         ctx.lineCap = "round";
 
         ctx.shadowColor = color;
-        ctx.shadowBlur = 8;
+        ctx.shadowBlur = 10;
 
         ctx.stroke();
 
-        // save stroke
-        currentStroke.push({
-          x: point.x,
-          y: point.y,
-          color,
-          size
-        });
+        currentStroke.push({ ...p, color, size });
       }
     }
 
-    prev = point;
+    prev = p;
 
   } else {
-    // Save completed stroke
     if (drawing && currentStroke.length > 0) {
       strokes.push(currentStroke);
       currentStroke = [];
     }
-
-    drawing = false;
     prev = null;
   }
+
+  lastGesture = stable;
+  drawing = (stable === "draw");
 });
 
 // Camera
