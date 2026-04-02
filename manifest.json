@@ -1,0 +1,8 @@
+{
+  "name": "Gesture Draw Pro",
+  "short_name": "DrawPro",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#000000",
+  "theme_color": "#000000"
+}
