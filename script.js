@@ -7,15 +7,22 @@ const undoBtn = document.getElementById("undoBtn");
 const saveBtn = document.getElementById("saveBtn");
 const clearBtn = document.getElementById("clearBtn");
 
-// Drawing state
+// State
 let prev = null;
 let last = null;
-
 let strokes = [];
 let currentStroke = [];
 
-let color = "#00ffff";
+let colors = ["#00ffff", "#ff3b3b", "#00ff88", "#ffd500"];
+let colorIndex = 0;
+let color = colors[colorIndex];
+
 let size = 5;
+
+// Transform (zoom + pan)
+let scale = 1;
+let offsetX = 0;
+let offsetY = 0;
 
 // Resize
 function resizeCanvas() {
@@ -43,9 +50,12 @@ saveBtn.onclick = () => {
   link.click();
 };
 
-// Redraw
+// Redraw with transform
 function redraw() {
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  ctx.setTransform(scale, 0, 0, scale, offsetX, offsetY);
 
   strokes.forEach(stroke => {
     for (let i = 1; i < stroke.length; i++) {
@@ -60,7 +70,7 @@ function redraw() {
   });
 }
 
-// ---------- SMOOTH ----------
+// Smooth
 function smooth(p) {
   if (!last) return p;
   return {
@@ -69,7 +79,7 @@ function smooth(p) {
   };
 }
 
-// ---------- GESTURES ----------
+// Gesture helpers
 function fingerUp(l, tip, pip) {
   return l[tip].y < l[pip].y;
 }
@@ -78,160 +88,35 @@ function isDraw(l) {
   return fingerUp(l, 8, 6) && !fingerUp(l, 12, 10);
 }
 
+function isTwoFinger(l) {
+  return fingerUp(l, 8, 6) && fingerUp(l, 12, 10);
+}
+
 function isPalm(l) {
   return fingerUp(l, 8, 6) &&
          fingerUp(l, 12, 10) &&
          fingerUp(l, 16, 14);
 }
 
-// ---------- SHAPE AI ----------
-function dist(a, b) {
-  return Math.hypot(a.x - b.x, a.y - b.y);
+function isFist(l) {
+  return !fingerUp(l, 8, 6) &&
+         !fingerUp(l, 12, 10);
 }
 
-// Line
-function isLine(points) {
-  if (points.length < 5) return false;
-
-  const start = points[0];
-  const end = points[points.length - 1];
-
-  let error = 0;
-
-  for (let p of points) {
-    const d = Math.abs(
-      (end.y - start.y) * p.x -
-      (end.x - start.x) * p.y +
-      end.x * start.y -
-      end.y * start.x
-    ) / Math.hypot(end.y - start.y, end.x - start.x);
-
-    error += d;
-  }
-
-  return error / points.length < 12;
+// Pinch distance
+function pinchDistance(l) {
+  return Math.hypot(
+    l[4].x - l[8].x,
+    l[4].y - l[8].y
+  );
 }
 
-// Circle
-function isCircle(points) {
-  if (points.length < 10) return false;
+// Gesture memory
+let lastGesture = "";
+let lastPinch = null;
+let lastPan = null;
 
-  if (dist(points[0], points[points.length - 1]) > 50) return false;
-
-  let cx = 0, cy = 0;
-  points.forEach(p => { cx += p.x; cy += p.y; });
-
-  cx /= points.length;
-  cy /= points.length;
-
-  let r = 0;
-  points.forEach(p => r += dist(p, {x: cx, y: cy}));
-  r /= points.length;
-
-  let error = 0;
-  points.forEach(p => {
-    error += Math.abs(dist(p, {x: cx, y: cy}) - r);
-  });
-
-  return error / points.length < 12;
-}
-
-// Rectangle
-function isRectangle(points) {
-  if (points.length < 10) return false;
-
-  let minX = Infinity, minY = Infinity;
-  let maxX = -Infinity, maxY = -Infinity;
-
-  points.forEach(p => {
-    minX = Math.min(minX, p.x);
-    minY = Math.min(minY, p.y);
-    maxX = Math.max(maxX, p.x);
-    maxY = Math.max(maxY, p.y);
-  });
-
-  const width = maxX - minX;
-  const height = maxY - minY;
-
-  if (width < 40 || height < 40) return false;
-
-  let edgePoints = 0;
-
-  points.forEach(p => {
-    const nearEdge =
-      Math.abs(p.x - minX) < 15 ||
-      Math.abs(p.x - maxX) < 15 ||
-      Math.abs(p.y - minY) < 15 ||
-      Math.abs(p.y - maxY) < 15;
-
-    if (nearEdge) edgePoints++;
-  });
-
-  return edgePoints / points.length > 0.6;
-}
-
-// Draw perfect
-function drawPerfectShape(points) {
-
-  if (isCircle(points)) {
-    let cx = 0, cy = 0;
-
-    points.forEach(p => {
-      cx += p.x;
-      cy += p.y;
-    });
-
-    cx /= points.length;
-    cy /= points.length;
-
-    let r = 0;
-    points.forEach(p => r += dist(p, {x: cx, y: cy}));
-    r /= points.length;
-
-    ctx.beginPath();
-    ctx.arc(cx, cy, r, 0, Math.PI * 2);
-    ctx.strokeStyle = points[0].color;
-    ctx.lineWidth = points[0].size;
-    ctx.stroke();
-    return true;
-  }
-
-  if (isRectangle(points)) {
-    let minX = Infinity, minY = Infinity;
-    let maxX = -Infinity, maxY = -Infinity;
-
-    points.forEach(p => {
-      minX = Math.min(minX, p.x);
-      minY = Math.min(minY, p.y);
-      maxX = Math.max(maxX, p.x);
-      maxY = Math.max(maxY, p.y);
-    });
-
-    ctx.beginPath();
-    ctx.rect(minX, minY, maxX - minX, maxY - minY);
-    ctx.strokeStyle = points[0].color;
-    ctx.lineWidth = points[0].size;
-    ctx.stroke();
-    return true;
-  }
-
-  if (isLine(points)) {
-    const start = points[0];
-    const end = points[points.length - 1];
-
-    ctx.beginPath();
-    ctx.moveTo(start.x, start.y);
-    ctx.lineTo(end.x, end.y);
-    ctx.strokeStyle = start.color;
-    ctx.lineWidth = start.size;
-    ctx.stroke();
-    return true;
-  }
-
-  return false;
-}
-
-// ---------- MAIN ----------
+// MediaPipe
 const hands = new Hands({
   locateFile: (file) =>
     `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
@@ -244,10 +129,13 @@ hands.setOptions({
   minTrackingConfidence: 0.5
 });
 
+// Main
 hands.onResults((results) => {
 
   if (!results.multiHandLandmarks) {
     prev = last = null;
+    lastPinch = null;
+    lastPan = null;
     return;
   }
 
@@ -261,7 +149,7 @@ hands.onResults((results) => {
   p = smooth(p);
   last = p;
 
-  // Clear
+  // ✋ Clear
   if (isPalm(l)) {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     strokes = [];
@@ -269,10 +157,50 @@ hands.onResults((results) => {
     return;
   }
 
-  // Draw
+  // ✊ Pause
+  if (isFist(l)) {
+    prev = null;
+    return;
+  }
+
+  // 🎨 Color change (two finger tap)
+  if (isTwoFinger(l) && lastGesture !== "two") {
+    colorIndex = (colorIndex + 1) % colors.length;
+    color = colors[colorIndex];
+  }
+
+  // 🔍 Zoom (pinch)
+  const pinch = pinchDistance(l);
+
+  if (pinch) {
+    if (lastPinch) {
+      const diff = pinch - lastPinch;
+      scale += diff * 2;
+
+      scale = Math.max(0.5, Math.min(3, scale));
+      redraw();
+    }
+    lastPinch = pinch;
+  }
+
+  // 🖐 Pan (move open hand)
+  if (isPalm(l)) {
+    if (lastPan) {
+      offsetX += p.x - lastPan.x;
+      offsetY += p.y - lastPan.y;
+      redraw();
+    }
+    lastPan = p;
+  } else {
+    lastPan = null;
+  }
+
+  // ✏️ Draw
   if (isDraw(l)) {
 
     if (prev) {
+      ctx.setTransform(scale, 0, 0, scale, offsetX, offsetY);
+
       ctx.beginPath();
       ctx.moveTo(prev.x, prev.y);
 
@@ -293,20 +221,14 @@ hands.onResults((results) => {
     prev = p;
 
   } else {
-
     if (currentStroke.length > 0) {
-
-      const corrected = drawPerfectShape(currentStroke);
-
-      if (!corrected) {
-        strokes.push(currentStroke);
-      }
-
+      strokes.push(currentStroke);
       currentStroke = [];
     }
-
     prev = null;
   }
+
+  lastGesture = isTwoFinger(l) ? "two" : "";
 });
 
 // Camera
@@ -325,4 +247,4 @@ camera.start();
 // Service Worker
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("sw.js");
-      }
+}
