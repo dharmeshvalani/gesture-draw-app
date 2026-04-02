@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Gesture Drawing Pro</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <link rel="stylesheet" href="style.css">
+
+  <!-- MediaPipe -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+</head>
+<body>
+
+<div class="container">
+
+  <video id="video" autoplay playsinline></video>
+  <canvas id="canvas"></canvas>
+
+  <!-- Premium Control Panel -->
+  <div class="panel">
+
+    <div class="group">
+      <label>🎨 Color</label>
+      <input type="color" id="colorPicker" value="#00ffff">
+    </div>
+
+    <div class="group">
+      <label>📏 Size</label>
+      <input type="range" id="brushSize" min="2" max="20" value="5">
+    </div>
+
+    <div class="buttons">
+      <button id="clearBtn">🧽 Clear</button>
+      <button id="saveBtn">💾 Save</button>
+    </div>
+
+  </div>
+
+</div>
+
+<script src="script.js"></script>
+</body>
+</html>
