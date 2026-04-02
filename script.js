@@ -1,3 +1,4 @@
+// Elements
 const video = document.getElementById("video");
 const canvas = document.getElementById("canvas");
 const ctx = canvas.getContext("2d");
@@ -7,6 +8,7 @@ const saveBtn = document.getElementById("saveBtn");
 const colorPicker = document.getElementById("colorPicker");
 const brushSize = document.getElementById("brushSize");
 
+// Drawing state
 let prevX = null;
 let prevY = null;
 
@@ -21,16 +23,14 @@ function resizeCanvas() {
 resizeCanvas();
 window.addEventListener("resize", resizeCanvas);
 
-// Update controls
+// Controls
 colorPicker.oninput = () => color = colorPicker.value;
 brushSize.oninput = () => size = brushSize.value;
 
-// Clear
 clearBtn.onclick = () => {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 };
 
-// Save Image
 saveBtn.onclick = () => {
   const link = document.createElement("a");
   link.download = "drawing.png";
@@ -44,13 +44,15 @@ const hands = new Hands({
     `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
 });
 
+// Better mobile detection
 hands.setOptions({
   maxNumHands: 1,
-  minDetectionConfidence: 0.7,
-  minTrackingConfidence: 0.7
+  modelComplexity: 1,
+  minDetectionConfidence: 0.5,
+  minTrackingConfidence: 0.5
 });
 
-// Gestures
+// Gesture detection
 function isOpenPalm(l) {
   return l[8].y < l[6].y &&
          l[12].y < l[10].y &&
@@ -62,31 +64,59 @@ function isIndexUp(l) {
   return l[8].y < l[6].y;
 }
 
-// Draw
-hands.onResults((res) => {
-  if (!res.multiHandLandmarks) return;
+// Main tracking
+hands.onResults((results) => {
 
-  const l = res.multiHandLandmarks[0];
+  console.log("Hand Results:", results); // FIX 2
 
-  const x = (1 - l[8].x) * canvas.width;
-  const y = l[8].y * canvas.height;
+  if (!results.multiHandLandmarks) {
+    prevX = prevY = null;
+    return;
+  }
 
-  if (isOpenPalm(l)) {
+  const landmarks = results.multiHandLandmarks[0];
+
+  // FIX 5 (DEBUG RED DOTS)
+  ctx.fillStyle = "red";
+  for (let i = 0; i < landmarks.length; i++) {
+    let px = (1 - landmarks[i].x) * canvas.width;
+    let py = landmarks[i].y * canvas.height;
+
+    ctx.beginPath();
+    ctx.arc(px, py, 4, 0, 2 * Math.PI);
+    ctx.fill();
+  }
+
+  // Index finger position
+  const x = (1 - landmarks[8].x) * canvas.width;
+  const y = landmarks[8].y * canvas.height;
+
+  // ERASE (open palm)
+  if (isOpenPalm(landmarks)) {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     prevX = prevY = null;
     return;
   }
 
-  if (isIndexUp(l)) {
+  // DRAW (index finger)
+  if (isIndexUp(landmarks)) {
+
+    // Smooth interpolation
     if (prevX && prevY) {
       ctx.beginPath();
       ctx.moveTo(prevX, prevY);
-      ctx.lineTo(x, y);
 
-      // Glow effect
+      // smoothing effect
+      const smoothX = (prevX + x) / 2;
+      const smoothY = (prevY + y) / 2;
+
+      ctx.lineTo(smoothX, smoothY);
+
       ctx.strokeStyle = color;
       ctx.lineWidth = size;
       ctx.lineCap = "round";
+
+      // Glow effect
       ctx.shadowColor = color;
       ctx.shadowBlur = 15;
 
@@ -95,15 +125,18 @@ hands.onResults((res) => {
 
     prevX = x;
     prevY = y;
+
   } else {
     prevX = prevY = null;
   }
 });
 
-// Camera
+// Camera start (FIXED)
 const camera = new Camera(video, {
   onFrame: async () => {
-    await hands.send({ image: video });
+    if (video.readyState === 4) {
+      await hands.send({ image: video });
+    }
   },
   width: 640,
   height: 480
